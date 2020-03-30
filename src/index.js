@@ -6,13 +6,15 @@ import {
     AuthenticationDetails,
 } from 'amazon-cognito-identity-js'
 
+AWS.config.region = defaultRegion;
+
 import AWS from 'aws-sdk/global';
 import {CognitoIdentityCredentials} from 'aws-sdk/global';
 import S3 from 'aws-sdk/clients/s3';
 
 const userPool = new CognitoUserPool({
-    UserPoolId: authCfg.UserPoolId,
-    ClientId: authCfg.ClientId
+    UserPoolId: authCfg.userPoolId,
+    ClientId: authCfg.clientId
 })
 
 const registerRequest = {
@@ -23,33 +25,32 @@ const registerRequest = {
 const registerUser = (registerData) => {
     return new Promise((resolve, onError) => {
         userPool.signUp(
-        registerData.email, 
-        registerData.password,
-        [ 
-            new CognitoUserAttribute({
-                'Name': 'website',
-                'Value': 'kdjdjd'
-            }),
-            new CognitoUserAttribute({
-                'Name': 'nickname',
-                'Value': 'hheheh'
-            })
-        ], 
-        null,
-        (err, result) => {
-            if (err) {
-                onError(err);
-            }
-            resolve(result);
-            }
+            registerData.email, 
+            registerData.password,
+            [ 
+                new CognitoUserAttribute({
+                    'Name': 'website',
+                    'Value': 'kdjdjd'
+                }),
+                new CognitoUserAttribute({
+                    'Name': 'nickname',
+                    'Value': 'hheheh'
+                })
+            ], 
+            null,
+            (err, result) => {
+                if (err) {
+                    onError(err);
+                }
+                resolve(result);
+                }
         )
     })
-
 }
 
 const confirmRequest = {
     username: registerRequest.email,
-    confirmationCode: '151768'
+    confirmationCode: '683981'
 }
 
 const confirmAccount = (confirmRequest) => {
@@ -96,7 +97,15 @@ const login = (loginRequest) => {
                 Logins: {
                     [credentialName]: result.getIdToken().getJwtToken(),
                     }
-                })
+                });
+                
+                AWS.config.credentials.refresh((error) => {
+            		if (error) {
+            			console.error(error);
+            		} else {
+            			console.log('Successfully logged!');
+            		}
+        		});
                 
                 resolve(result)
             },
@@ -121,7 +130,7 @@ const refreshSession = () => {
         }
         
         cognitoUser.getSession((err, result) => {
-            if(err) {
+            if (err) {
                 error(err);
             }
             
@@ -134,7 +143,7 @@ const refreshSession = () => {
             
             
         cognitoUser.getUserAttributes((err, attributes) => {
-            if(err) {
+            if (err) {
                 error(err);
             }
             res(attributes.reduce((profile, item) => {
@@ -199,4 +208,5 @@ const listFilesInBucket = () => {
 const listItemsInBucketButton = document.querySelector('.listItems')
 listItemsInBucketButton.addEventListener('click', () => {
     listFilesInBucket();
+console.log('all my files');
 })
