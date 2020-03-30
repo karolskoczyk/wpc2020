@@ -1,10 +1,14 @@
-import {authCfg} from './env'
+import {authCfg, identityPoolId, credentialName, defaultRegion, myBucket} from './env'
 import {
     CognitoUserPool, 
     CognitoUserAttribute, 
     CognitoUser, 
-    AuthenticationDetails
+    AuthenticationDetails,
 } from 'amazon-cognito-identity-js'
+
+import AWS from 'aws-sdk/global';
+import {CognitoIdentityCredentials} from 'aws-sdk/global';
+import S3 from 'aws-sdk/clients/s3';
 
 const userPool = new CognitoUserPool({
     UserPoolId: authCfg.UserPoolId,
@@ -25,16 +29,18 @@ const registerUser = (registerData) => {
             new CognitoUserAttribute({
                 'Name': 'website',
                 'Value': 'kdjdjd'
+            }),
+            new CognitoUserAttribute({
+                'Name': 'nickname',
+                'Value': 'hheheh'
             })
         ], 
         null,
         (err, result) => {
             if (err) {
                 onError(err);
-                
             }
-                resolve(result);
-                
+            resolve(result);
             }
         )
     })
@@ -84,13 +90,61 @@ const login = (loginRequest) => {
             Password: loginRequest.password
         }),
         {
-            onSuccess: (result) => resolve(result),
+            onSuccess: (result) => {
+                AWS.config.credentials = new CognitoIdentityCredentials({
+                IdentityPoolId: identityPoolId,
+                Logins: {
+                    [credentialName]: result.getIdToken().getJwtToken(),
+                    }
+                })
+                
+                resolve(result)
+            },
+                
             onFailure: (err) => onError(err)
         }
     )
 });
 }
 
+const greetUser = (username) => {
+    const greetEl = document.querySelector('.greet');
+    greetEl.textContent = `Hello ${username}`;
+}
+
+const refreshSession = () => {
+    return new Promise((res, error) => {
+        const cognitoUser = userPool.getCurrentUser();
+        
+        if (cognitoUser == null) {
+            error('user is not authorized')
+        }
+        
+        cognitoUser.getSession((err, result) => {
+            if(err) {
+                error(err);
+            }
+            
+            AWS.config.credentials = new CognitoIdentityCredentials({
+            IdentityPoolId: identityPoolId,
+            Logins: {
+                [credentialName]: result.getIdToken().getJwtToken(),
+                }
+            });
+            
+            
+        cognitoUser.getUserAttributes((err, attributes) => {
+            if(err) {
+                error(err);
+            }
+            res(attributes.reduce((profile, item) => {
+                return {... profile, [item.Name]: item.Value}
+            }, {}));
+        })
+        })
+    })
+    
+}
 
 const registerButton = document.querySelector('.registerUser');
 registerButton.addEventListener('click', () => {
@@ -111,8 +165,38 @@ confirmButton.addEventListener('click', () => {
 })
 
 const loginButton = document.querySelector('.loginUser');
-confirmButton.addEventListener('click', () => {
+loginButton.addEventListener('click', () => {
     login(loginRequest)
-        .then(result => console.log(result))
+        .then(result => refreshSession())
+        .then(user => greetUser(user.nickname))
         .catch(err => console.log('access deny' + err.message))
+})
+
+(() => {
+    refreshSession()
+        .then(user => greetUser(user.nickname))
+        .catch(err => greetUser(`guest`))
+    
+})();
+
+const listFilesInBucket = () => {
+    const s3 = new S3();
+    const params = {
+        Bucket: myBucket,
+        MaxKeys: 100
+    }
+    
+    s3.listObjects(params, (err, data) => {
+        if (err) {
+            console.log(err);
+        }
+        console.log(data);
+        
+    })
+    
+}
+
+const listItemsInBucketButton = document.querySelector('.listItems')
+listItemsInBucketButton.addEventListener('click', () => {
+    listFilesInBucket();
 })
