@@ -1,165 +1,25 @@
 import {authCfg, identityPoolId, credentialName, defaultRegion, myBucket} from './env'
-import {
-    CognitoUserPool, 
-    CognitoUserAttribute, 
-    CognitoUser, 
-    AuthenticationDetails,
-} from 'amazon-cognito-identity-js'
 
 AWS.config.region = defaultRegion;
 
 import AWS from 'aws-sdk/global';
-import {CognitoIdentityCredentials} from 'aws-sdk/global';
 import S3 from 'aws-sdk/clients/s3';
+import {AuthorizationService} from './security/authorization.service';
+import {registerRequest, confirmRequest, loginRequest} from './fixtures/login';
 
-const userPool = new CognitoUserPool({
-    UserPoolId: authCfg.userPoolId,
-    ClientId: authCfg.clientId
-})
+import './styles.scss';
 
-const registerRequest = {
-    email: 'karolskoczyk96@gmail.com',
-    password: '1234qwer'
-}
-
-const registerUser = (registerData) => {
-    return new Promise((resolve, onError) => {
-        userPool.signUp(
-            registerData.email, 
-            registerData.password,
-            [ 
-                new CognitoUserAttribute({
-                    'Name': 'website',
-                    'Value': 'kdjdjd'
-                }),
-                new CognitoUserAttribute({
-                    'Name': 'nickname',
-                    'Value': 'hheheh'
-                })
-            ], 
-            null,
-            (err, result) => {
-                if (err) {
-                    onError(err);
-                }
-                resolve(result);
-                }
-        )
-    })
-}
-
-const confirmRequest = {
-    username: registerRequest.email,
-    confirmationCode: '683981'
-}
-
-const confirmAccount = (confirmRequest) => {
-    return new Promise((resolve, onError) => {
-    const cognitoUser = new CognitoUser({
-        Username: confirmRequest.username,
-        Pool: userPool
-    })
-    
-    cognitoUser.confirmRegistration(
-        confirmRequest.confirmationCode,
-        true,
-        (err, result) => {
-            if (err) {
-                onError(err);
-                return
-            }
-            resolve(result);
-        })
-});
-}
-
-const loginRequest = {
-    username: registerRequest.email,
-    password: registerRequest.password
-}
-
-const login = (loginRequest) => {
-    return new Promise((resolve, onError) => {
-        const cognitoUser = new CognitoUser({
-            Username: loginRequest.username,
-            Pool: userPool
-    })
-    
-    cognitoUser.authenticateUser(
-        new AuthenticationDetails({
-            Username: loginRequest.username,
-            Password: loginRequest.password
-        }),
-        {
-            onSuccess: (result) => {
-                AWS.config.credentials = new CognitoIdentityCredentials({
-                IdentityPoolId: identityPoolId,
-                Logins: {
-                    [credentialName]: result.getIdToken().getJwtToken(),
-                    }
-                });
-                
-                AWS.config.credentials.refresh((error) => {
-            		if (error) {
-            			console.error(error);
-            		} else {
-            			console.log('Successfully logged!');
-            		}
-        		});
-                
-                resolve(result)
-            },
-                
-            onFailure: (err) => onError(err)
-        }
-    )
-});
-}
+const auth = new AuthorizationService(authCfg, AWS.config);
 
 const greetUser = (username) => {
     const greetEl = document.querySelector('.greet');
     greetEl.textContent = `Hello ${username}`;
 }
 
-const refreshSession = () => {
-    return new Promise((res, error) => {
-        const cognitoUser = userPool.getCurrentUser();
-        
-        if (cognitoUser == null) {
-            error('user is not authorized')
-        }
-        
-        cognitoUser.getSession((err, result) => {
-            if (err) {
-                error(err);
-            }
-            
-            AWS.config.credentials = new CognitoIdentityCredentials({
-            IdentityPoolId: identityPoolId,
-            Logins: {
-                [credentialName]: result.getIdToken().getJwtToken(),
-                }
-            });
-            
-            
-        cognitoUser.getUserAttributes((err, attributes) => {
-            if (err) {
-                error(err);
-            }
-            res(attributes.reduce((profile, item) => {
-                return {... profile, [item.Name]: item.Value}
-            }, {}));
-        })
-        })
-    })
-    
-}
-
 const registerButton = document.querySelector('.registerUser');
 registerButton.addEventListener('click', () => {
     console.log(`User ${registerRequest.email} is going to be registered`);
-    
-    registerUser(registerRequest)
+    auth.registerUser(registerRequest)
         .then(result => console.log('All is fine, user registered'))
         .catch(err => console.log('Sth is not yes' + err.message))
 })
@@ -168,21 +28,21 @@ const confirmButton = document.querySelector('.confirmUser');
 confirmButton.addEventListener('click', () => {
     console.log(`User ${confirmRequest.username} is going to be confirmed`);
     
-    confirmAccount(confirmRequest)
+    auth.confirmAccount(confirmRequest)
         .then(result => console.log('All is fine, user registered'))
         .catch(err => console.log('Sth is not yes' + err.message))
 })
 
 const loginButton = document.querySelector('.loginUser');
 loginButton.addEventListener('click', () => {
-    login(loginRequest)
-        .then(result => refreshSession())
+    auth.login(loginRequest)
+        .then(result => auth.refreshSession())
         .then(user => greetUser(user.nickname))
         .catch(err => console.log('access deny' + err.message))
 })
 
 (() => {
-    refreshSession()
+    auth.refreshSession()
         .then(user => greetUser(user.nickname))
         .catch(err => greetUser(`guest`))
     
@@ -205,8 +65,90 @@ const listFilesInBucket = () => {
     
 }
 
-const listItemsInBucketButton = document.querySelector('.listItems')
+//Use credentials to list bucket items
+const listItemsInBucketButton = document.querySelector('.listItems');
 listItemsInBucketButton.addEventListener('click', () => {
     listFilesInBucket();
-console.log('all my files');
+    console.log('all my files');
+});
+
+const uploadInput = document.querySelector('.upload__input');
+const uploadBtn = document.querySelector('.upload__confirm');
+
+const progressBarEl = document.querySelector('.progress__bar');
+
+const uploadToS3 = (file) => {
+    const userId = AWS.config.credentials.identityId;
+    const params = {
+        Body: file,
+        Bucket: myBucket,
+        Key: `uek-krakow/${userId}/photos/${file.name}`
+    }
+    
+    return new Promise((res, fail) => {
+        const s3 = new S3();
+        s3.putObject(params, (err, data) => {
+            if (err) {
+                fail(err);
+            }
+            
+            res(params.Key);
+        }).on('httpUploadProgress', (progress) => {
+            const value = Math.round((progress.loaded / progress.total) * 100); 
+            progressBarEl.style.width = `${value}%`;
+            progressBarEl.textContent = `${value} %`;
+        })
+    })
+
+}
+
+const getSignedURL = (key) => {
+    const s3 = new S3();
+    const params = {Bucket: myBucket, Key: key};
+    return s3.getSignedUrl('getObject', params);
+}
+
+const createHtmlElFromString = (elementString) => {
+    let parent = document.createElement('div');
+    parent.innerHTML = elementString.trim();
+    
+    return parent.firstChild;
+}
+
+const uploadedFilesListEl = document.querySelector('.uploadedFilesListEl')
+const addToUploadedFilesList = (url) => {
+    uploadedFilesListEl = (url) => {
+        const image = `
+        <li>
+        <img height="128" src=${url}"/>
+        </li>
+        `;
+        uploadedFilesListEl.appendChild(createHtmlElFromString(image))
+    }
+}
+
+uploadBtn.addEventListener('click', () => {
+    console.log(uploadInput.files);
+    
+    if (!uploadInput.files.length > 0) {
+        return;
+    }
+    
+    const toBeUploadeFiles = [...uploadInput.files]
+    toBeUploadeFiles.forEach((file, i) => {
+        uploadToS3(file)
+            .then(res => getSignedURL(res))
+            .then(url => addToUploadedFilesList(url))
+            .finally(() => uploadInput.value = "")
+            .catch(err => console.log(err))
+    })
+    
 })
+
+// let photos = []
+// photos.push({key: 'sasdasfafds.jpeg'})
+
+// const orderAnimationRequest = {
+//     email: 'my-email'
+    
+// }
