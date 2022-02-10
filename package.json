@@ -6,7 +6,7 @@
   "license": "MIT",
   "devDependencies": {
     "css-loader": "^3.5.2",
-    "node-sass": "^4.13.1",
+    "node-sass": "^7.0.0",
     "sass-loader": "^8.0.2",
     "styles-loader": "^2.0.0",
     "webpack": "^4.42.0",
